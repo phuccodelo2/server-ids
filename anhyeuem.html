@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lá th xanh</title>
+<style>
+  body{
+    margin:0;
+    height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    background:linear-gradient(135deg,#1e3a8a,#0ea5e9);
+    font-family:Arial,Helvetica,sans-serif;
+  }
+  .envelope{
+    position:relative;
+    width:300px;
+    height:200px;
+    perspective:1000px;
+  }
+  .back, .front, .flap{
+    position:absolute;
+    inset:0;
+    border-radius:12px;
+  }
+  .back{
+    background:#38bdf8;
+  }
+  .front{
+    background:#0284c7;
+    clip-path:polygon(0 40%,50% 80%,100% 40%,100% 100%,0 100%);
+  }
+  .flap{
+    background:#0ea5e9;
+    clip-path:polygon(0 0,100% 0,50% 60%);
+    transform-origin:top center;
+    transition:transform 0.8s ease;
+    z-index:2;
+  }
+  .letter{
+    position:absolute;
+    top:10%;
+    left:50%;
+    transform:translateX(-50%) scale(0.95);
+    width:85%;
+    height:80%;
+    background:#fff;
+    border-radius:8px;
+    padding:15px;
+    box-shadow:0 10px 20px rgba(0,0,0,0.25);
+    opacity:0;
+    transition:opacity 0.8s ease, transform 0.8s ease;
+    overflow:auto;
+  }
+  .open .flap{
+    transform:rotateX(-150deg);
+  }
+  .open .letter{
+    opacity:1;
+    transform:translateX(-50%) scale(1);
+  }
+  .btn{
+    margin-top:20px;
+    padding:10px 18px;
+    border:0;
+    border-radius:8px;
+    font-weight:bold;
+    background:#fff;
+    color:#0ea5e9;
+    cursor:pointer;
+    box-shadow:0 5px 15px rgba(0,0,0,0.2);
+  }
+</style>
+</head>
+<body>
+
+<div class="wrapper" style="text-align:center">
+  <div class="envelope" id="envelope">
+    <div class="back"></div>
+    <div class="flap"></div>
+    <div class="front"></div>
+    <div class="letter" id="letter">
+      <h3>Lá th gi em </h3>
+      <p>em à hôm qua anh thy em có chút mt mõi
+anh chân thành xin li em vì không bit thu hiu và
+quan tâm n em anh ch bt hi và nói nhng câu ng ngn
+em bo em khóc anh tht s mun khóc theo em vì anh thng em
+ rt nhiu và lúc anh ang vt lá th này anh không bt ti sao 
+anh li ri nc mt anh luôn c gn dành nhng gì tt p n vs em
+nhng có l vì mt chút nào ó anh ã tht bi anh thc s mun bit
+cm giác ca em lúc y nhng anh s làm phin em và em ko thích nên 
+amh không giám hi anh ch bt chúc em ng ngoan anh xin li vì ã không 
+quan tâm n cm súc ca em anh thành thc xin li anh mà anh mun nói này
+em à  em có áp lc hay bun hay dn di gì thì hãy tâm s vs anh anh thc s mun
+bit cm giác ca em lúc y ra sao anh mun em tâm s vs anh mình cùng nhau chia s
+nhng nim vui nhng chuyn bun trong cuc sng và luôn cho nhau li khuyen an i  cho nhau
+ch ng có chu ng mt mình yêu nhâu là  chia s cho nhau cm súc anh ko mun em giu cm súc 
+anh luôn sn sàng ch em và lng nghe nhng gì em mun chia s và luôn mun an i em 
+
+
+              và cui cùng là anh rt thng em em à  cm n em ã kiên nhn c ht nhng gì trong lòng anh nói ra .</p>
+    </div>
+  </div>
+  <button class="btn" id="openBtn">M th</button>
+</div>
+
+<script>
+  const env = document.getElementById('envelope');
+  const btn = document.getElementById('openBtn');
+  btn.addEventListener('click',()=>{
+    env.classList.toggle('open');
+  });
+</script>
+
+</body>
+</html>
