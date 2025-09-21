@@ -1,162 +1,110 @@
--- AutoStandableSquares.lua (LocalScript - StarterPlayerScripts)
+-- AirWalkLocal.lua (LocalScript - StarterPlayerScripts)
 
 -- Services
-local Players = game:GetService("Players")                   -- 1
-local RunService = game:GetService("RunService")            -- 2
-local Task = task                                           -- 3
+local Players = game:GetService("Players")                  -- 1
+local RunService = game:GetService("RunService")           -- 2
 
--- Player / Character
-local player = Players.LocalPlayer                          -- 4
-local character = player.Character or player.CharacterAdded:Wait() -- 5
-local hrp = character:WaitForChild("HumanoidRootPart")      -- 6
+-- Player + character refs
+local player = Players.LocalPlayer                         -- 3
+local character = player.Character or player.CharacterAdded:Wait() -- 4
+local hrp = character:WaitForChild("HumanoidRootPart")     -- 5
+local humanoid = character:WaitForChild("Humanoid")        -- 6
 
--- UI
-local screenGui = Instance.new("ScreenGui")                 -- 7
-screenGui.Name = "AutoStandSquaresGUI"                      -- 8
-screenGui.ResetOnSpawn = false                              -- 9
-screenGui.Parent = player:WaitForChild("PlayerGui")         -- 10
+-- UI (simple toggle)
+local screenGui = Instance.new("ScreenGui")                -- 7
+screenGui.Name = "AirWalkGUI"                              -- 8
+screenGui.ResetOnSpawn = false                             -- 9
+screenGui.Parent = player:WaitForChild("PlayerGui")        -- 10
 
-local toggleBtn = Instance.new("TextButton")                -- 11
-toggleBtn.Parent = screenGui                                -- 12
-toggleBtn.Size = UDim2.new(0, 160, 0, 40)                   -- 13
-toggleBtn.Position = UDim2.new(0, 10, 0, 10)                -- 14
-toggleBtn.AnchorPoint = Vector2.new(0, 0)                   -- 15
-toggleBtn.Text = "AutoSquares: OFF"                         -- 16
-toggleBtn.BackgroundTransparency = 0.2                      -- 17
+local toggleBtn = Instance.new("TextButton")               -- 11
+toggleBtn.Parent = screenGui                               -- 12
+toggleBtn.Size = UDim2.new(0, 160, 0, 40)                  -- 13
+toggleBtn.Position = UDim2.new(0, 10, 0, 10)               -- 14
+toggleBtn.Text = "AirWalk: OFF"                            -- 15
+toggleBtn.BackgroundTransparency = 0.3                     -- 16
 
 -- State
-local running = false                                       -- 18
-local createdParts = {}                                     -- 19
-local cycleThread = nil                                     -- 20
-local lock = false                                          -- 21
+local airPart = nil                                        -- 17 (platform part)
+local updating = false                                     -- 18 (flag chạy update)
+local offsetY = 3.5                                        -- 19 (khoảng cách từ HRP xuống platform)
+local partSize = Vector3.new(4, 0.6, 4)                    -- 20 (kích thước platform)
+local updateBind = nil                                     -- 21 (connection để hủy)
 
--- Parameters (có thể chỉnh)
-local squareSize = Vector3.new(2, 0.5, 2)                   -- 22  (kích thước khối vuông)
-local spawnInterval = 0.2                                   -- 23  (delay giữa mỗi part khi đang "on" — 0.2s như yêu cầu)
-local activeDuration = 2                                    -- 24  (thời gian bật tạo trong 1 pha)
-local pauseDuration = 0.5                                   -- 25  (thời gian tắt để part rơi)
-local totalDuration = 7                                     -- 26  (tổng thời gian auto trước khi dừng)
-local maxParts = 50                                         -- 27  (giới hạn số part để tránh gây lag)
+-- Tạo platform (invisible or semi-transparent) dưới người
+local function createAirPart()
+    if airPart and airPart.Parent then return airPart end
 
--- Hàm tạo một part ở vị trí dưới chân (dựa trên HumanoidRootPart)
-local function createSquareUnder(position)
-    -- Nếu đã đạt giới hạn thì dọn cũ trước khi tạo thêm
-    if #createdParts >= maxParts then
-        -- huỷ phần cũ nhất để nhường chỗ
-        if createdParts[1] and createdParts[1].Parent then
-            createdParts[1]:Destroy()
-        end
-        table.remove(createdParts, 1)
-    end
+    local p = Instance.new("Part")                         -- 22
+    p.Size = partSize                                      -- 23
+    p.Anchored = true                                      -- 24 (neo để không bị physics ảnh hưởng khi ta dịch chuyển)
+    p.CanCollide = true                                    -- 25 (cho phép người chơi đứng lên)
+    p.Transparency = 1                                     -- 26 (1 = hoàn toàn trong suốt; đổi nếu muốn nhìn thấy)
+    p.CanQuery = false                                     -- 27 (giảm việc raycast không cần thiết)
+    p.CanTouch = false                                     -- 28 (nếu cần có thể true để detect chạm; hiện false)
+    p.Parent = workspace                                   -- 29
+    p.Name = "AirWalkPlatform_" .. player.Name             -- 30
 
-    local part = Instance.new("Part")                       -- 28
-    part.Size = squareSize                                  -- 29
-    part.Anchored = true                                    -- 30  (neo để người chơi có thể đứng lên)
-    part.CanCollide = true                                  -- 31  (cho phép va chạm để đứng trên đó)
-    part.Position = position - Vector3.new(0, 3.5, 0)      -- 32  (đặt thấp dưới HRP; điều chỉnh nếu cần)
-    part.BrickColor = BrickColor.new("Bright violet")       -- 33  (màu dễ thấy)
-    part.Material = Enum.Material.SmoothPlastic             -- 34  (vật liệu)
-    part.TopSurface = Enum.SurfaceType.Smooth               -- 35
-    part.BottomSurface = Enum.SurfaceType.Smooth            -- 36
-    part.Parent = workspace                                 -- 37
-    table.insert(createdParts, part)                        -- 38
-    return part
+    airPart = p
+    return p
 end
 
--- Hàm bỏ neo tất cả part hiện có để chúng rơi
-local function unanchorAll()
-    for i = #createdParts, 1, -1 do
-        local p = createdParts[i]
-        if p and p.Parent then
-            p.Anchored = false
-        end
+-- Hủy platform
+local function destroyAirPart()
+    if airPart then
+        if airPart.Parent then airPart:Destroy() end
+        airPart = nil
     end
 end
 
--- Hàm dọn sạch createdParts (hủy các part)
-local function clearAll()
-    for _, p in ipairs(createdParts) do
-        if p and p.Parent then
-            p:Destroy()
-        end
-    end
-    createdParts = {}
-end
+-- Update vị trí platform theo HRP mỗi frame (dùng RenderStepped để mượt)
+local function startUpdating()
+    if updating then return end
+    local p = createAirPart()
+    updating = true
 
--- Hàm tìm vị trí "dưới chân" dựa trên HumanoidRootPart
-local function footPosition()
-    -- Dùng HRP để lấy vị trí tham chiếu; offset có thể chỉnh để phù hợp R6/R15
-    return hrp.Position
-end
-
--- Hàm thực hiện chu kỳ on/off trong khoảng totalDuration
-local function runCycle()
-    if lock then return end
-    lock = true
-    local startTime = tick()
-    local elapsed = 0
-    while elapsed < totalDuration and running do
-        -- PHASE: active (tạo part liên tục trong activeDuration)
-        local phaseStart = tick()
-        while tick() - phaseStart < activeDuration and running and tick() - startTime < totalDuration do
-            -- tạo 1 part dưới chân player
-            local pos = footPosition()
-            createSquareUnder(pos)
-            Task.wait(spawnInterval) -- chờ 0.2s giữa mỗi part
-        end
-
-        -- khi kết thúc pha active: bỏ neo để part rơi
-        unanchorAll()
-
-        -- nếu hết tổng thời gian hoặc user tắt thì break
-        elapsed = tick() - startTime
-        if elapsed >= totalDuration or not running then break end
-
-        -- PHASE: pause (chờ pauseDuration để part rơi)
-        local pauseStart = tick()
-        while tick() - pauseStart < pauseDuration and running and tick() - startTime < totalDuration do
-            Task.wait(0.05)
-        end
-
-        elapsed = tick() - startTime
-    end
-
-    -- Kết thúc: đảm bảo tắt và dọn dẹp (xóa các part sau 1 giây để nhìn thấy hiệu ứng rơi)
-    running = false
-    lock = false
-    Task.delay(1, function()
-        clearAll()
+    updateBind = RunService.RenderStepped:Connect(function()
+        if not character or not hrp or not p then return end
+        -- Tính vị trí platform: dưới HRP theo offsetY
+        local targetCFrame = hrp.CFrame * CFrame.new(0, -offsetY, 0)
+        -- Giữ platform thẳng ngang
+        local newCFrame = CFrame.new(targetCFrame.Position) * CFrame.Angles(0, hrp.Orientation.Y * math.pi/180, 0)
+        -- Gán CFrame trực tiếp (anchored part)
+        p.CFrame = newCFrame
     end)
 end
 
--- Xử lý nút toggle
+-- Dừng cập nhật và xóa platform
+local function stopUpdating()
+    if updateBind then
+        updateBind:Disconnect()
+        updateBind = nil
+    end
+    updating = false
+    destroyAirPart()
+end
+
+-- Toggle handler
 toggleBtn.MouseButton1Click:Connect(function()
     if toggleBtn.Text:find("OFF") then
-        -- Bật
-        running = true
-        toggleBtn.Text = "AutoSquares: ON"
-        -- Nếu thread chưa chạy thì start
-        if not cycleThread then
-            cycleThread = Task.spawn(function()
-                runCycle()
-                cycleThread = nil
-                toggleBtn.Text = "AutoSquares: OFF"
-            end)
+        -- Bật AirWalk
+        toggleBtn.Text = "AirWalk: ON"
+        startUpdating()
+        -- Khi bật, bỏ trạng thái nhảy để tránh phạm luật vật lý khi đứng trên platform
+        if humanoid then
+            humanoid.PlatformStand = false
         end
     else
-        -- Tắt sớm
-        running = false
-        toggleBtn.Text = "AutoSquares: OFF"
-        -- bỏ neo để các part rơi ngay
-        unanchorAll()
-        -- dọn sau 1 giây
-        Task.delay(1, clearAll)
+        -- Tắt AirWalk
+        toggleBtn.Text = "AirWalk: OFF"
+        stopUpdating()
     end
 end)
 
--- Nếu character respawn, cập nhật hrp và dọn phần cũ
+-- Nếu respawn thì dọn sạch và cập nhật tham chiếu
 player.CharacterAdded:Connect(function(char)
+    -- dọn cũ nếu có
+    stopUpdating()
     character = char
     hrp = character:WaitForChild("HumanoidRootPart")
-    clearAll()
+    humanoid = character:WaitForChild("Humanoid")
 end)
