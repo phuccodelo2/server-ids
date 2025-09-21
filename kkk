@@ -1,0 +1,108 @@
+-- AirWalkLocal.lua (LocalScript - StarterPlayerScripts)
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Player + character refs
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- UI (simple toggle)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AirWalkGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Parent = screenGui
+toggleBtn.Size = UDim2.new(0, 160, 0, 40)
+toggleBtn.Position = UDim2.new(0, 10, 0, 10)
+toggleBtn.Text = "AirWalk: OFF"
+toggleBtn.BackgroundTransparency = 0.3
+
+-- State
+local airPart = nil
+local updating = false
+local offsetY = 3.5
+local partSize = Vector3.new(4, 0.6, 4)
+local updateBind = nil
+
+-- Tạo platform (invisible) dưới người
+local function createAirPart()
+    if airPart and airPart.Parent then return airPart end
+    local p = Instance.new("Part")
+    p.Size = partSize
+    p.Anchored = true
+    p.CanCollide = true
+    p.Transparency = 1
+    p.CanQuery = false
+    p.CanTouch = false
+    p.Parent = workspace
+    p.Name = "AirWalkPlatform_" .. player.Name
+    airPart = p
+    return p
+end
+
+-- Hủy platform
+local function destroyAirPart()
+    if airPart then
+        if airPart.Parent then airPart:Destroy() end
+        airPart = nil
+    end
+end
+
+-- Update vị trí platform theo HRP mỗi frame
+local function startUpdating()
+    if updating then return end
+    local p = createAirPart()
+    updating = true
+
+    updateBind = RunService.RenderStepped:Connect(function()
+        if not character or not hrp or not p then return end
+        local targetCFrame = hrp.CFrame * CFrame.new(0, -offsetY, 0)
+        local newCFrame = CFrame.new(targetCFrame.Position)
+        p.CFrame = newCFrame
+    end)
+end
+
+-- Dừng cập nhật và xóa platform
+local function stopUpdating()
+    if updateBind then
+        updateBind:Disconnect()
+        updateBind = nil
+    end
+    updating = false
+    destroyAirPart()
+end
+
+-- Toggle handler
+toggleBtn.MouseButton1Click:Connect(function()
+    if toggleBtn.Text:find("OFF") then
+        toggleBtn.Text = "AirWalk: ON"
+        startUpdating()
+        if humanoid then humanoid.PlatformStand = false end
+    else
+        toggleBtn.Text = "AirWalk: OFF"
+        stopUpdating()
+    end
+end)
+
+-- Nếu respawn thì dọn sạch và cập nhật tham chiếu
+player.CharacterAdded:Connect(function(char)
+    stopUpdating()
+    character = char
+    hrp = character:WaitForChild("HumanoidRootPart")
+    humanoid = character:WaitForChild("Humanoid")
+    -- Auto bật lại sau khi respawn
+    toggleBtn.Text = "AirWalk: ON"
+    startUpdating()
+end)
+
+-- ========================
+-- AUTO BẬT KHI VÀO GAME
+-- ========================
+toggleBtn.Text = "AirWalk: ON"
+startUpdating()
