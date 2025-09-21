@@ -1,108 +1,172 @@
--- AirWalkLocal.lua (LocalScript - StarterPlayerScripts)
+-- TeleToNPC2AndHold.lua (LocalScript - StarterPlayerScripts)
+-- Tác dụng: Tele up lên trên đầu NPC có tên "NPC2" cách 5 studs,
+-- tạo 1 part làm platform gắn theo NPC để giữ người chơi trên đó,
+-- và hướng mặt người chơi xuống NPC. Phím T = bật/toggle, Y = detach/stop.
 
 -- Services
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")                -- 1
+local RunService = game:GetService("RunService")          -- 2
+local UserInputService = game:GetService("UserInputService") -- 3
 
--- Player + character refs
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
+-- Player refs
+local player = Players.LocalPlayer                        -- 4
+local character = player.Character or player.CharacterAdded:Wait() -- 5
+local hrp = character:WaitForChild("HumanoidRootPart")    -- 6
+local humanoid = character:WaitForChild("Humanoid")      -- 7
 
--- UI (simple toggle)
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AirWalkGUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = player:WaitForChild("PlayerGui")
-
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Parent = screenGui
-toggleBtn.Size = UDim2.new(0, 160, 0, 40)
-toggleBtn.Position = UDim2.new(0, 10, 0, 10)
-toggleBtn.Text = "AirWalk: OFF"
-toggleBtn.BackgroundTransparency = 0.3
+-- Configurable parameters
+local NPC_NAME = "NPC2"                                   -- 8  (tên NPC cần target)
+local ABOVE_DISTANCE = 5                                  -- 9  (khoảng cách lên trên đầu tính bằng studs)
+local PLATFORM_SIZE = Vector3.new(4, 0.6, 4)              -- 10 (kích thước part giữ)
+local PLATFORM_OFFSET_Y = ABOVE_DISTANCE                  -- 11 (offset Y của platform so với NPC PrimaryPart)
 
 -- State
-local airPart = nil
-local updating = false
-local offsetY = 3.5
-local partSize = Vector3.new(4, 0.6, 4)
-local updateBind = nil
+local attached = false                                    -- 12 (đang gắn/giữ hay không)
+local targetNPC = nil                                     -- 13 (tham chiếu NPC target)
+local platform = nil                                      -- 14 (part được tạo để giữ)
+local updateConn = nil                                    -- 15 (connection RenderStepped để cập nhật vị trí)
+local npcPrimary = nil                                    -- 16 (tham chiếu primary part của NPC)
 
--- Tạo platform (invisible) dưới người
-local function createAirPart()
-    if airPart and airPart.Parent then return airPart end
+-- Helper: tìm NPC với tên NPC_NAME trong workspace (đệ quy, nhanh)
+local function findNPCByName(name)
+    -- Tìm trực tiếp theo tên ở workspace root trước
+    local candidate = workspace:FindFirstChild(name)
+    if candidate then return candidate end
+
+    -- Nếu không có ở root, dò sâu trong các folder con
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj.Name == name and obj:IsA("Model") then
+            return obj
+        end
+    end
+    return nil
+end
+
+-- Tạo platform (part) và config ban đầu
+local function createPlatform()
+    if platform and platform.Parent then return platform end
+
     local p = Instance.new("Part")
-    p.Size = partSize
-    p.Anchored = true
-    p.CanCollide = true
-    p.Transparency = 1
-    p.CanQuery = false
-    p.CanTouch = false
+    p.Name = "HoldPlatform_For_" .. player.Name
+    p.Size = PLATFORM_SIZE
+    p.Anchored = true                  -- ta điều khiển CFrame mỗi frame
+    p.CanCollide = true                -- cho phép đứng trên đó
+    p.Transparency = 1                 -- ẩn platform (đổi nếu muốn nhìn thấy)
     p.Parent = workspace
-    p.Name = "AirWalkPlatform_" .. player.Name
-    airPart = p
+    platform = p
     return p
 end
 
--- Hủy platform
-local function destroyAirPart()
-    if airPart then
-        if airPart.Parent then airPart:Destroy() end
-        airPart = nil
+-- Dọn platform và hủy kết nối update
+local function cleanupPlatform()
+    if updateConn then
+        updateConn:Disconnect()
+        updateConn = nil
     end
+    if platform then
+        if platform.Parent then platform:Destroy() end
+        platform = nil
+    end
+    attached = false
+    targetNPC = nil
+    npcPrimary = nil
 end
 
--- Update vị trí platform theo HRP mỗi frame
-local function startUpdating()
-    if updating then return end
-    local p = createAirPart()
-    updating = true
+-- Kiểm tra & set target NPC, trả về true nếu hợp lệ
+local function setTargetNPC()
+    local npc = findNPCByName(NPC_NAME)
+    if not npc then
+        warn("TeleScript: Không tìm thấy NPC tên '" .. NPC_NAME .. "' trong workspace.")
+        return false
+    end
 
-    updateBind = RunService.RenderStepped:Connect(function()
-        if not character or not hrp or not p then return end
-        local targetCFrame = hrp.CFrame * CFrame.new(0, -offsetY, 0)
-        local newCFrame = CFrame.new(targetCFrame.Position)
-        p.CFrame = newCFrame
+    -- cố lấy PrimaryPart hoặc HumanoidRootPart
+    local primary = npc.PrimaryPart or npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso") or npc:FindFirstChild("UpperTorso") or npc:FindFirstChild("LowerTorso")
+    if not primary then
+        warn("TeleScript: NPC '" .. NPC_NAME .. "' không có PrimaryPart/HumanoidRootPart/Torso để lấy vị trí.")
+        return false
+    end
+
+    targetNPC = npc
+    npcPrimary = primary
+    return true
+end
+
+-- Tele người chơi lên trên NPC khoảng ABOVE_DISTANCE, tạo platform và bind update
+local function attachToNPC()
+    if attached then return end
+    if not setTargetNPC() then return end
+
+    -- tạo platform
+    local p = createPlatform()
+
+    -- vị trí ban đầu platform: trên đầu NPC
+    local basePos = npcPrimary.Position + Vector3.new(0, PLATFORM_OFFSET_Y, 0)
+    p.CFrame = CFrame.new(basePos)
+
+    -- Tele người chơi lên vị trí đứng trên platform
+    -- Ta đặt HRP ở ngay trên platform + tiny offset để tránh bị chạm/lồng
+    local standPos = basePos + Vector3.new(0, PLATFORM_SIZE.Y/2 + 1.0, 0)
+    -- Hướng nhìn người chơi xuống NPC: dùng CFrame.new(eyePos, targetPos)
+    hrp.CFrame = CFrame.new(standPos, npcPrimary.Position)
+
+    -- Kích hoạt trạng thái attached
+    attached = true
+
+    -- Update mỗi frame: giữ platform gắn theo NPC và hướng player về NPC
+    updateConn = RunService.RenderStepped:Connect(function()
+        -- bảo đảm NPC vẫn tồn tại
+        if not targetNPC or not targetNPC.Parent or not npcPrimary or not npcPrimary.Parent then
+            cleanupPlatform()
+            return
+        end
+
+        -- cập nhật position platform theo NPC (nếu NPC di chuyển)
+        local newBase = npcPrimary.Position + Vector3.new(0, PLATFORM_OFFSET_Y, 0)
+        p.CFrame = CFrame.new(newBase)
+
+        -- đặt HRP đứng trên platform (giữ phần ngang theo vị trí HRP cũ nhưng Y cố định)
+        local current = hrp.Position
+        local desiredHRP = Vector3.new(current.X, newBase.Y + PLATFORM_SIZE.Y/2 + 1.0, current.Z)
+        -- quay mặt xuống NPC
+        hrp.CFrame = CFrame.new(desiredHRP, npcPrimary.Position)
     end)
 end
 
--- Dừng cập nhật và xóa platform
-local function stopUpdating()
-    if updateBind then
-        updateBind:Disconnect()
-        updateBind = nil
-    end
-    updating = false
-    destroyAirPart()
+-- Tắt/thoát khỏi trạng thái gắn giữ
+local function detachFromNPC()
+    cleanupPlatform()
 end
 
--- Toggle handler
-toggleBtn.MouseButton1Click:Connect(function()
-    if toggleBtn.Text:find("OFF") then
-        toggleBtn.Text = "AirWalk: ON"
-        startUpdating()
-        if humanoid then humanoid.PlatformStand = false end
-    else
-        toggleBtn.Text = "AirWalk: OFF"
-        stopUpdating()
+-- Bắt phím: T = toggle attach; Y = detach ngay
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.T then
+        if not attached then
+            attachToNPC()
+            print("TeleScript: Attached to NPC '" .. NPC_NAME .. "'.")
+        else
+            detachFromNPC()
+            print("TeleScript: Detached.")
+        end
+    elseif input.KeyCode == Enum.KeyCode.Y then
+        detachFromNPC()
+        print("TeleScript: Detached by Y.")
     end
 end)
 
--- Nếu respawn thì dọn sạch và cập nhật tham chiếu
+-- Dọn & detach khi respawn / rời server
 player.CharacterAdded:Connect(function(char)
-    stopUpdating()
+    -- nếu đang attached thì dọn platform khi người chơi respawn
+    detachFromNPC()
+    -- cập nhật tham chiếu character mới
     character = char
     hrp = character:WaitForChild("HumanoidRootPart")
     humanoid = character:WaitForChild("Humanoid")
-    -- Auto bật lại sau khi respawn
-    toggleBtn.Text = "AirWalk: ON"
-    startUpdating()
 end)
 
--- ========================
--- AUTO BẬT KHI VÀO GAME
--- ========================
-toggleBtn.Text = "AirWalk: ON"
-startUpdating()
+-- Khi script start, không auto attach (an toàn). Nếu mày muốn auto attach khi vào game,
+-- uncomment hai dòng dưới:
+-- if not attached then attachToNPC() end
+
+-- Kết thúc file
