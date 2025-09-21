@@ -1,51 +1,65 @@
--- AutoSquareUnderFeet.lua (LocalScript - StarterPlayerScripts)
+-- AutoStandableSquares.lua (LocalScript - StarterPlayerScripts)
 
 -- Services
 local Players = game:GetService("Players")                   -- 1
 local RunService = game:GetService("RunService")            -- 2
+local Task = task                                           -- 3
 
 -- Player / Character
-local player = Players.LocalPlayer                          -- 3
-local character = player.Character or player.CharacterAdded:Wait() -- 4
-local hrp = character:WaitForChild("HumanoidRootPart")      -- 5
+local player = Players.LocalPlayer                          -- 4
+local character = player.Character or player.CharacterAdded:Wait() -- 5
+local hrp = character:WaitForChild("HumanoidRootPart")      -- 6
 
 -- UI
-local screenGui = Instance.new("ScreenGui")                 -- 6
-screenGui.Name = "AutoSquaresGUI"                           -- 7
-screenGui.ResetOnSpawn = false                              -- 8
-screenGui.Parent = player:WaitForChild("PlayerGui")         -- 9
+local screenGui = Instance.new("ScreenGui")                 -- 7
+screenGui.Name = "AutoStandSquaresGUI"                      -- 8
+screenGui.ResetOnSpawn = false                              -- 9
+screenGui.Parent = player:WaitForChild("PlayerGui")         -- 10
 
-local toggleBtn = Instance.new("TextButton")                -- 10
-toggleBtn.Parent = screenGui                                 -- 11
-toggleBtn.Size = UDim2.new(0, 140, 0, 40)                   -- 12
-toggleBtn.Position = UDim2.new(0, 10, 0, 10)                -- 13
-toggleBtn.AnchorPoint = Vector2.new(0, 0)                   -- 14
-toggleBtn.Text = "AutoSquares: OFF"                         -- 15
-toggleBtn.BackgroundTransparency = 0.2                      -- 16
+local toggleBtn = Instance.new("TextButton")                -- 11
+toggleBtn.Parent = screenGui                                -- 12
+toggleBtn.Size = UDim2.new(0, 160, 0, 40)                   -- 13
+toggleBtn.Position = UDim2.new(0, 10, 0, 10)                -- 14
+toggleBtn.AnchorPoint = Vector2.new(0, 0)                   -- 15
+toggleBtn.Text = "AutoSquares: OFF"                         -- 16
+toggleBtn.BackgroundTransparency = 0.2                      -- 17
 
 -- State
-local running = false                                       -- 17
-local createdParts = {}                                     -- 18
-local cycleThread = nil                                     -- 19
-local lock = false                                          -- 20
+local running = false                                       -- 18
+local createdParts = {}                                     -- 19
+local cycleThread = nil                                     -- 20
+local lock = false                                          -- 21
 
 -- Parameters (có thể chỉnh)
-local squareSize = Vector3.new(2, 0.5, 2)                   -- 21  (kích thước khối vuông)
-local spawnInterval = 0.12                                  -- 22  (giữa 2 part tạo liên tiếp khi đang "on")
-local activeDuration = 2                                     -- 23  (thời gian bật tạo trong 1 pha)
-local pauseDuration = 0.5                                    -- 24  (thời gian tắt để part rơi)
-local totalDuration = 7                                      -- 25  (tổng thời gian auto trước khi dừng)
+local squareSize = Vector3.new(2, 0.5, 2)                   -- 22  (kích thước khối vuông)
+local spawnInterval = 0.2                                   -- 23  (delay giữa mỗi part khi đang "on" — 0.2s như yêu cầu)
+local activeDuration = 2                                    -- 24  (thời gian bật tạo trong 1 pha)
+local pauseDuration = 0.5                                   -- 25  (thời gian tắt để part rơi)
+local totalDuration = 7                                     -- 26  (tổng thời gian auto trước khi dừng)
+local maxParts = 50                                         -- 27  (giới hạn số part để tránh gây lag)
 
 -- Hàm tạo một part ở vị trí dưới chân (dựa trên HumanoidRootPart)
 local function createSquareUnder(position)
-    local part = Instance.new("Part")                       -- 26
-    part.Size = squareSize                                  -- 27
-    part.Anchored = true                                    -- 28 (ban đầu neo lại để giữ vị trí)
-    part.CanCollide = false                                 -- 29 (không va chạm để tránh ảnh hưởng vật lý player)
-    part.Position = position - Vector3.new(0, squareSize.Y/2 + 3.5, 0) -- 30 (đặt thấp dưới HRP; -3.5 để gần chân)
-    part.BrickColor = BrickColor.new("Bright violet")       -- 31 (màu để dễ thấy, đổi tuỳ thích)
-    part.Parent = workspace                                 -- 32 (gắn vào workspace để hiển thị)
-    table.insert(createdParts, part)                        -- 33 (lưu để dọn/xử lý sau)
+    -- Nếu đã đạt giới hạn thì dọn cũ trước khi tạo thêm
+    if #createdParts >= maxParts then
+        -- huỷ phần cũ nhất để nhường chỗ
+        if createdParts[1] and createdParts[1].Parent then
+            createdParts[1]:Destroy()
+        end
+        table.remove(createdParts, 1)
+    end
+
+    local part = Instance.new("Part")                       -- 28
+    part.Size = squareSize                                  -- 29
+    part.Anchored = true                                    -- 30  (neo để người chơi có thể đứng lên)
+    part.CanCollide = true                                  -- 31  (cho phép va chạm để đứng trên đó)
+    part.Position = position - Vector3.new(0, 3.5, 0)      -- 32  (đặt thấp dưới HRP; điều chỉnh nếu cần)
+    part.BrickColor = BrickColor.new("Bright violet")       -- 33  (màu dễ thấy)
+    part.Material = Enum.Material.SmoothPlastic             -- 34  (vật liệu)
+    part.TopSurface = Enum.SurfaceType.Smooth               -- 35
+    part.BottomSurface = Enum.SurfaceType.Smooth            -- 36
+    part.Parent = workspace                                 -- 37
+    table.insert(createdParts, part)                        -- 38
     return part
 end
 
@@ -71,7 +85,7 @@ end
 
 -- Hàm tìm vị trí "dưới chân" dựa trên HumanoidRootPart
 local function footPosition()
-    -- Dùng HRP để lấy vị trí tham chiếu; thay đổi offset nếu cần
+    -- Dùng HRP để lấy vị trí tham chiếu; offset có thể chỉnh để phù hợp R6/R15
     return hrp.Position
 end
 
@@ -88,7 +102,7 @@ local function runCycle()
             -- tạo 1 part dưới chân player
             local pos = footPosition()
             createSquareUnder(pos)
-            task.wait(spawnInterval)
+            Task.wait(spawnInterval) -- chờ 0.2s giữa mỗi part
         end
 
         -- khi kết thúc pha active: bỏ neo để part rơi
@@ -101,7 +115,7 @@ local function runCycle()
         -- PHASE: pause (chờ pauseDuration để part rơi)
         local pauseStart = tick()
         while tick() - pauseStart < pauseDuration and running and tick() - startTime < totalDuration do
-            task.wait(0.05)
+            Task.wait(0.05)
         end
 
         elapsed = tick() - startTime
@@ -110,7 +124,7 @@ local function runCycle()
     -- Kết thúc: đảm bảo tắt và dọn dẹp (xóa các part sau 1 giây để nhìn thấy hiệu ứng rơi)
     running = false
     lock = false
-    task.delay(1, function()
+    Task.delay(1, function()
         clearAll()
     end)
 end
@@ -123,7 +137,7 @@ toggleBtn.MouseButton1Click:Connect(function()
         toggleBtn.Text = "AutoSquares: ON"
         -- Nếu thread chưa chạy thì start
         if not cycleThread then
-            cycleThread = task.spawn(function()
+            cycleThread = Task.spawn(function()
                 runCycle()
                 cycleThread = nil
                 toggleBtn.Text = "AutoSquares: OFF"
@@ -136,7 +150,7 @@ toggleBtn.MouseButton1Click:Connect(function()
         -- bỏ neo để các part rơi ngay
         unanchorAll()
         -- dọn sau 1 giây
-        task.delay(1, clearAll)
+        Task.delay(1, clearAll)
     end
 end)
 
