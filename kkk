@@ -1,172 +1,137 @@
--- TeleToNPC2AndHold.lua (LocalScript - StarterPlayerScripts)
--- Tác dụng: Tele up lên trên đầu NPC có tên "NPC2" cách 5 studs,
--- tạo 1 part làm platform gắn theo NPC để giữ người chơi trên đó,
--- và hướng mặt người chơi xuống NPC. Phím T = bật/toggle, Y = detach/stop.
+--// PHUCMAX Rainbow Hub
+local player = game.Players.LocalPlayer
+local UIS = game:GetService("UserInputService")
 
--- Services
-local Players = game:GetService("Players")                -- 1
-local RunService = game:GetService("RunService")          -- 2
-local UserInputService = game:GetService("UserInputService") -- 3
+-- Main ScreenGui
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.Name = "PHUCMAX_UI"
 
--- Player refs
-local player = Players.LocalPlayer                        -- 4
-local character = player.Character or player.CharacterAdded:Wait() -- 5
-local hrp = character:WaitForChild("HumanoidRootPart")    -- 6
-local humanoid = character:WaitForChild("Humanoid")      -- 7
+-- Toggle Button (nút mở/đóng UI chính)
+local ToggleMain = Instance.new("ImageButton", ScreenGui)
+ToggleMain.Size = UDim2.new(0,50,0,50)
+ToggleMain.Position = UDim2.new(0,20,0.5,-25)
+ToggleMain.Image = "rbxassetid://1125510" -- ID hình (đổi tuỳ mày)
+ToggleMain.BackgroundTransparency = 1
 
--- Configurable parameters
-local NPC_NAME = "NPC2"                                   -- 8  (tên NPC cần target)
-local ABOVE_DISTANCE = 5                                  -- 9  (khoảng cách lên trên đầu tính bằng studs)
-local PLATFORM_SIZE = Vector3.new(4, 0.6, 4)              -- 10 (kích thước part giữ)
-local PLATFORM_OFFSET_Y = ABOVE_DISTANCE                  -- 11 (offset Y của platform so với NPC PrimaryPart)
+-- Kéo thả Toggle Button
+local dragging, dragInput, dragStart, startPos
+local function dragify(frame)
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
 
--- State
-local attached = false                                    -- 12 (đang gắn/giữ hay không)
-local targetNPC = nil                                     -- 13 (tham chiếu NPC target)
-local platform = nil                                      -- 14 (part được tạo để giữ)
-local updateConn = nil                                    -- 15 (connection RenderStepped để cập nhật vị trí)
-local npcPrimary = nil                                    -- 16 (tham chiếu primary part của NPC)
-
--- Helper: tìm NPC với tên NPC_NAME trong workspace (đệ quy, nhanh)
-local function findNPCByName(name)
-    -- Tìm trực tiếp theo tên ở workspace root trước
-    local candidate = workspace:FindFirstChild(name)
-    if candidate then return candidate end
-
-    -- Nếu không có ở root, dò sâu trong các folder con
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj.Name == name and obj:IsA("Model") then
-            return obj
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
         end
-    end
-    return nil
-end
+    end)
 
--- Tạo platform (part) và config ban đầu
-local function createPlatform()
-    if platform and platform.Parent then return platform end
-
-    local p = Instance.new("Part")
-    p.Name = "HoldPlatform_For_" .. player.Name
-    p.Size = PLATFORM_SIZE
-    p.Anchored = true                  -- ta điều khiển CFrame mỗi frame
-    p.CanCollide = true                -- cho phép đứng trên đó
-    p.Transparency = 1                 -- ẩn platform (đổi nếu muốn nhìn thấy)
-    p.Parent = workspace
-    platform = p
-    return p
-end
-
--- Dọn platform và hủy kết nối update
-local function cleanupPlatform()
-    if updateConn then
-        updateConn:Disconnect()
-        updateConn = nil
-    end
-    if platform then
-        if platform.Parent then platform:Destroy() end
-        platform = nil
-    end
-    attached = false
-    targetNPC = nil
-    npcPrimary = nil
-end
-
--- Kiểm tra & set target NPC, trả về true nếu hợp lệ
-local function setTargetNPC()
-    local npc = findNPCByName(NPC_NAME)
-    if not npc then
-        warn("TeleScript: Không tìm thấy NPC tên '" .. NPC_NAME .. "' trong workspace.")
-        return false
-    end
-
-    -- cố lấy PrimaryPart hoặc HumanoidRootPart
-    local primary = npc.PrimaryPart or npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso") or npc:FindFirstChild("UpperTorso") or npc:FindFirstChild("LowerTorso")
-    if not primary then
-        warn("TeleScript: NPC '" .. NPC_NAME .. "' không có PrimaryPart/HumanoidRootPart/Torso để lấy vị trí.")
-        return false
-    end
-
-    targetNPC = npc
-    npcPrimary = primary
-    return true
-end
-
--- Tele người chơi lên trên NPC khoảng ABOVE_DISTANCE, tạo platform và bind update
-local function attachToNPC()
-    if attached then return end
-    if not setTargetNPC() then return end
-
-    -- tạo platform
-    local p = createPlatform()
-
-    -- vị trí ban đầu platform: trên đầu NPC
-    local basePos = npcPrimary.Position + Vector3.new(0, PLATFORM_OFFSET_Y, 0)
-    p.CFrame = CFrame.new(basePos)
-
-    -- Tele người chơi lên vị trí đứng trên platform
-    -- Ta đặt HRP ở ngay trên platform + tiny offset để tránh bị chạm/lồng
-    local standPos = basePos + Vector3.new(0, PLATFORM_SIZE.Y/2 + 1.0, 0)
-    -- Hướng nhìn người chơi xuống NPC: dùng CFrame.new(eyePos, targetPos)
-    hrp.CFrame = CFrame.new(standPos, npcPrimary.Position)
-
-    -- Kích hoạt trạng thái attached
-    attached = true
-
-    -- Update mỗi frame: giữ platform gắn theo NPC và hướng player về NPC
-    updateConn = RunService.RenderStepped:Connect(function()
-        -- bảo đảm NPC vẫn tồn tại
-        if not targetNPC or not targetNPC.Parent or not npcPrimary or not npcPrimary.Parent then
-            cleanupPlatform()
-            return
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
         end
+    end)
 
-        -- cập nhật position platform theo NPC (nếu NPC di chuyển)
-        local newBase = npcPrimary.Position + Vector3.new(0, PLATFORM_OFFSET_Y, 0)
-        p.CFrame = CFrame.new(newBase)
-
-        -- đặt HRP đứng trên platform (giữ phần ngang theo vị trí HRP cũ nhưng Y cố định)
-        local current = hrp.Position
-        local desiredHRP = Vector3.new(current.X, newBase.Y + PLATFORM_SIZE.Y/2 + 1.0, current.Z)
-        -- quay mặt xuống NPC
-        hrp.CFrame = CFrame.new(desiredHRP, npcPrimary.Position)
+    UIS.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
     end)
 end
+dragify(ToggleMain)
 
--- Tắt/thoát khỏi trạng thái gắn giữ
-local function detachFromNPC()
-    cleanupPlatform()
-end
+-- Main Frame
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0,300,0,400)
+MainFrame.Position = UDim2.new(0.5,-150,0.5,-200)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+MainFrame.Visible = false
 
--- Bắt phím: T = toggle attach; Y = detach ngay
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.T then
-        if not attached then
-            attachToNPC()
-            print("TeleScript: Attached to NPC '" .. NPC_NAME .. "'.")
-        else
-            detachFromNPC()
-            print("TeleScript: Detached.")
+-- Bo góc
+local UICorner = Instance.new("UICorner", MainFrame)
+UICorner.CornerRadius = UDim.new(0,12)
+
+-- Viền rainbow
+local UIStroke = Instance.new("UIStroke", MainFrame)
+UIStroke.Thickness = 3
+UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+-- Rainbow effect cho viền
+task.spawn(function()
+    while task.wait() do
+        for i = 0, 1, 0.01 do
+            UIStroke.Color = Color3.fromHSV(i,1,1)
+            task.wait(0.05)
         end
-    elseif input.KeyCode == Enum.KeyCode.Y then
-        detachFromNPC()
-        print("TeleScript: Detached by Y.")
     end
 end)
 
--- Dọn & detach khi respawn / rời server
-player.CharacterAdded:Connect(function(char)
-    -- nếu đang attached thì dọn platform khi người chơi respawn
-    detachFromNPC()
-    -- cập nhật tham chiếu character mới
-    character = char
-    hrp = character:WaitForChild("HumanoidRootPart")
-    humanoid = character:WaitForChild("Humanoid")
+-- Title PHUCMAX rainbow
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(1,0,0,40)
+Title.Text = "PHUCMAX"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 24
+Title.BackgroundTransparency = 1
+
+task.spawn(function()
+    while task.wait() do
+        for i = 0,1,0.01 do
+            Title.TextColor3 = Color3.fromHSV(i,1,1)
+            task.wait(0.05)
+        end
+    end
 end)
 
--- Khi script start, không auto attach (an toàn). Nếu mày muốn auto attach khi vào game,
--- uncomment hai dòng dưới:
--- if not attached then attachToNPC() end
+-- Scrollable buttons
+local ScrollingFrame = Instance.new("ScrollingFrame", MainFrame)
+ScrollingFrame.Size = UDim2.new(1,0,1,-40)
+ScrollingFrame.Position = UDim2.new(0,0,0,40)
+ScrollingFrame.CanvasSize = UDim2.new(0,0,0,0)
+ScrollingFrame.ScrollBarThickness = 6
+ScrollingFrame.BackgroundTransparency = 1
 
--- Kết thúc file
+-- Demo button 1 (Run Script)
+local Btn1 = Instance.new("TextButton", ScrollingFrame)
+Btn1.Size = UDim2.new(1,-20,0,40)
+Btn1.Position = UDim2.new(0,10,0,10)
+Btn1.Text = "Run Demo Script"
+Btn1.BackgroundColor3 = Color3.fromRGB(40,40,40)
+Btn1.TextColor3 = Color3.fromRGB(255,255,255)
+local UICorner1 = Instance.new("UICorner", Btn1)
+UICorner1.CornerRadius = UDim.new(0,8)
+
+Btn1.MouseButton1Click:Connect(function()
+    print("Demo script chạy!")
+    -- chèn script thật ở đây
+end)
+
+-- Demo button 2 (Toggle Feature)
+local Btn2 = Instance.new("TextButton", ScrollingFrame)
+Btn2.Size = UDim2.new(1,-20,0,40)
+Btn2.Position = UDim2.new(0,10,0,60)
+Btn2.Text = "Feature: OFF"
+Btn2.BackgroundColor3 = Color3.fromRGB(40,40,40)
+Btn2.TextColor3 = Color3.fromRGB(255,255,255)
+local UICorner2 = Instance.new("UICorner", Btn2)
+UICorner2.CornerRadius = UDim.new(0,8)
+
+local featureOn = false
+Btn2.MouseButton1Click:Connect(function()
+    featureOn = not featureOn
+    Btn2.Text = featureOn and "Feature: ON" or "Feature: OFF"
+end)
+
+-- Kéo thả main UI
+dragify(MainFrame)
+
+-- Toggle UI chính bằng nút hình
+ToggleMain.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
